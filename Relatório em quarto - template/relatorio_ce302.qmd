@@ -1,0 +1,319 @@
+---
+title: "Título do Trabalho: Uma Análise Estatística de [Tema]"
+subtitle: "CE302 — Elementos de Programação para Estatística"
+author:
+  - name: "Nome do Aluno 1"
+    affiliation: "Departamento de Estatística, UFPR"
+  - name: "Nome do Aluno 2"
+    affiliation: "Departamento de Estatística, UFPR"
+  - name: "Nome do Aluno 3"
+    affiliation: "Departamento de Estatística, UFPR"
+date: today
+date-format: "DD/MM/YYYY"
+lang: pt
+format:
+  html:
+    toc: true
+    toc-title: "Sumário"
+    toc-depth: 3
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    code-summary: "Ver código"
+    fig-cap-location: bottom
+    tbl-cap-location: top
+    embed-resources: true
+  pdf:
+    toc: true
+    toc-title: "Sumário"
+    number-sections: true
+    fig-cap-location: bottom
+    tbl-cap-location: top
+bibliography: referencias.bib
+csl: https://raw.githubusercontent.com/citation-style-language/styles/master/associacao-brasileira-de-normas-tecnicas.csl 
+execute:
+  echo: true
+  warning: false
+  message: false
+  cache: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+# Pacotes necessários
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(scales)
+
+# Configurações globais de gráficos
+theme_set(theme_minimal(base_size = 12))
+
+# Semente para reprodutibilidade
+set.seed(42)
+```
+
+---
+
+
+
+# Introdução {#sec-intro}
+
+[**Instrução**: Contextualize o tema escolhido, apresente o problema de pesquisa e enuncie os 
+objetivos da análise. O leitor deve entender *por que* o tema é relevante e *o que* será investigado.]
+
+[Exemplo de parágrafo introdutório:]
+
+A análise de [**tema**] representa um campo de grande relevância em [**área de aplicação**]. 
+Compreender os padrões e tendências presentes nesses dados permite [**benefício ou insight esperado**]. 
+Neste contexto, o presente trabalho propõe uma análise estatística exploratória e inferencial 
+de [**descrição do conjunto de dados**], com o objetivo de [**objetivo geral**].
+
+Os objetivos específicos desta análise são:
+
+- Descrever as características principais do conjunto de dados por meio de estatísticas descritivas;
+- Identificar padrões e relações entre as variáveis de interesse;
+- [Adicione objetivos específicos relevantes ao seu tema].
+
+Este relatório está organizado da seguinte forma: a @sec-metodos descreve os dados e métodos 
+utilizados; a @sec-resultados apresenta os resultados e discussões; e a @sec-conclusao sintetiza 
+os principais achados.
+
+# Materiais e Métodos {#sec-metodos}
+
+## Conjunto de Dados
+
+[Descreva a origem, o contexto de coleta e as características gerais dos dados.]
+
+```{r}
+#| label: carrega-dados
+#| echo: true
+
+# SUBSTITUA pelo carregamento dos seus dados reais
+# Exemplo com dados embutidos do R:
+dados <- datasets::mtcars |>
+  as_tibble(rownames = "modelo") |>
+  rename(
+    consumo_mpg    = mpg,
+    cilindros      = cyl,
+    cilindrada     = disp,
+    potencia_hp    = hp,
+    relacao_eixo   = drat,
+    peso_ton       = wt,
+    tempo_quarto   = qsec,
+    motor_vs       = vs,
+    transmissao    = am,
+    marchas        = gear,
+    carburadores   = carb
+  )
+
+# Visão geral
+glimpse(dados)
+```
+
+```{r}
+#| label: stats-basicas
+#| include: false
+
+n_obs      <- nrow(dados)
+n_vars     <- ncol(dados)
+media_cons <- mean(dados$consumo_mpg) |> round(2)
+dp_cons    <- sd(dados$consumo_mpg) |> round(2)
+min_cons   <- min(dados$consumo_mpg)
+max_cons   <- max(dados$consumo_mpg)
+```
+
+O conjunto de dados é composto por `r n_obs` observações e `r n_vars` variáveis. 
+A variável de interesse principal, consumo em milhas por galão, apresenta média de 
+`r media_cons` mpg (DP = `r dp_cons`), com valores entre `r min_cons` e `r max_cons` mpg.
+
+## Pré-processamento
+
+[Descreva as etapas de limpeza, transformação ou seleção de variáveis realizadas.]
+
+```{r}
+#| label: preprocessamento
+
+# Exemplo: verificação e tratamento de valores ausentes
+dados_limpos <- dados |>
+  drop_na() |>
+  mutate(
+    transmissao = factor(transmissao, levels = c(0, 1), 
+                         labels = c("Automático", "Manual")),
+    cilindros   = factor(cilindros)
+  )
+
+cat("Observações após limpeza:", nrow(dados_limpos), "\n")
+cat("Valores ausentes removidos:", nrow(dados) - nrow(dados_limpos), "\n")
+```
+
+## Técnicas Estatísticas
+
+As análises realizadas neste trabalho incluem:
+
+1. **Análise descritiva**: medidas de tendência central, dispersão e distribuição das variáveis;
+2. **Visualização exploratória**: histogramas, boxplots e gráficos de dispersão;
+3. **[Adicione as técnicas que você usará]**: ex. teste de hipóteses, correlação, regressão.
+
+Todas as análises foram conduzidas no ambiente R [@R2024], com auxílio dos pacotes 
+`tidyverse` [@Wickham2019] e `ggplot2` [@Wickham2016].
+
+# Resultados e Discussão {#sec-resultados}
+
+## Análise Descritiva
+
+A @tbl-descritiva apresenta as principais estatísticas descritivas das variáveis numéricas do 
+conjunto de dados.
+
+```{r}
+#| label: tbl-descritiva
+#| tbl-cap: "Estatísticas descritivas das variáveis numéricas."
+
+dados_limpos |>
+  select(consumo_mpg, cilindrada, potencia_hp, peso_ton) |>
+  summarise(across(everything(), list(
+    Média  = \(x) round(mean(x), 2),
+    Mediana = \(x) round(median(x), 2),
+    DP     = \(x) round(sd(x), 2),
+    Mín    = \(x) round(min(x), 2),
+    Máx    = \(x) round(max(x), 2)
+  ))) |>
+  pivot_longer(everything(), names_sep = "_", names_to = c("Variável", "Estatística")) |>
+  pivot_wider(names_from = "Estatística", values_from = "value") |>
+  kbl(booktabs = TRUE, align = "lrrrrr") |>
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+## Distribuição das Variáveis
+
+A @fig-histogramas apresenta a distribuição das principais variáveis do conjunto de dados.
+
+```{r}
+#| label: fig-histogramas
+#| fig-cap: "Distribuição de consumo e potência dos veículos."
+#| fig-subcap:
+#|   - "Consumo (mpg)"
+#|   - "Potência (hp)"
+#| layout-ncol: 2
+#| fig-width: 5
+#| fig-height: 4
+
+# Histograma 1: consumo
+ggplot(dados_limpos, aes(x = consumo_mpg)) +
+  geom_histogram(bins = 10, fill = "#2C7BB6", color = "white", alpha = 0.85) +
+  geom_vline(aes(xintercept = mean(consumo_mpg)), 
+             color = "#D7191C", linetype = "dashed", linewidth = 1) +
+  labs(x = "Consumo (mpg)", y = "Frequência") +
+  annotate("text", x = mean(dados_limpos$consumo_mpg) + 1.5, 
+           y = 7, label = paste0("Média: ", round(mean(dados_limpos$consumo_mpg), 1)),
+           color = "#D7191C", size = 3.5)
+
+# Histograma 2: potência
+ggplot(dados_limpos, aes(x = potencia_hp)) +
+  geom_histogram(bins = 10, fill = "#1A9641", color = "white", alpha = 0.85) +
+  geom_vline(aes(xintercept = mean(potencia_hp)), 
+             color = "#D7191C", linetype = "dashed", linewidth = 1) +
+  labs(x = "Potência (hp)", y = "Frequência")
+```
+
+## Análise por Grupos
+
+A @fig-boxplot mostra a distribuição do consumo segundo o tipo de transmissão.
+
+```{r}
+#| label: fig-boxplot
+#| fig-cap: "Consumo médio por tipo de transmissão e número de cilindros."
+#| fig-width: 7
+#| fig-height: 4.5
+
+ggplot(dados_limpos, aes(x = transmissao, y = consumo_mpg, fill = cilindros)) +
+  geom_boxplot(alpha = 0.75, outlier.shape = 21) +
+  scale_fill_brewer(palette = "Set2", name = "Cilindros") +
+  labs(
+    x     = "Tipo de Transmissão",
+    y     = "Consumo (mpg)",
+    title = "Distribuição do consumo por transmissão e cilindros"
+  ) +
+  theme(legend.position = "right")
+```
+
+```{r}
+#| label: stats-grupos
+#| include: false
+
+resumo_trans <- dados_limpos |>
+  group_by(transmissao) |>
+  summarise(media = round(mean(consumo_mpg), 1), .groups = "drop")
+
+media_manual    <- resumo_trans |> filter(transmissao == "Manual") |> pull(media)
+media_automatico <- resumo_trans |> filter(transmissao == "Automático") |> pull(media)
+```
+
+Veículos com transmissão manual apresentaram consumo médio de `r media_manual` mpg, 
+superior ao observado em veículos automáticos (`r media_automatico` mpg), 
+sugerindo que [**interprete o resultado no contexto do seu tema**].
+
+## Relação Entre Variáveis
+
+A @fig-dispersao explora a relação entre peso e consumo dos veículos.
+
+```{r}
+#| label: fig-dispersao
+#| fig-cap: "Relação entre peso e consumo dos veículos, por tipo de transmissão."
+#| fig-width: 7
+#| fig-height: 4.5
+
+ggplot(dados_limpos, aes(x = peso_ton, y = consumo_mpg, 
+                          color = transmissao, shape = transmissao)) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_smooth(method = "lm", se = TRUE, alpha = 0.15) +
+  scale_color_manual(values = c("Automático" = "#E66101", "Manual" = "#5E3C99"),
+                     name = "Transmissão") +
+  scale_shape_manual(values = c(16, 17), name = "Transmissão") +
+  labs(
+    x = "Peso (1000 lbs)",
+    y = "Consumo (mpg)",
+    title = "Peso vs. Consumo por tipo de transmissão"
+  )
+```
+
+[**Interprete o gráfico**: O que a relação entre as variáveis indica? Há algum padrão interessante?]
+
+# Conclusão {#sec-conclusao}
+
+[**Instrução**: Sintetize os principais achados, retomando os objetivos enunciados na @sec-intro. 
+Não apresente resultados novos aqui — apenas interprete e contextualize o que foi encontrado.]
+
+Este trabalho apresentou uma análise estatística de [**tema**], com base em um conjunto de 
+dados contendo `r n_obs` observações. Os principais achados foram:
+
+- [Achado 1 — com referência à seção ou figura correspondente, ex.: conforme @fig-boxplot];
+- [Achado 2];
+- [Achado 3].
+
+[Limitações do estudo e sugestões para trabalhos futuros, se pertinente.]
+
+::: {.callout-note}
+# Declaração de Uso de Inteligência Artificial
+
+Este trabalho utilizou ferramentas de inteligência artificial (IA) como auxílio no processo de elaboração. 
+Especificamente, [**descreva aqui**: ex. "o assistente Claude (Anthropic) foi utilizado para revisão 
+gramatical e sugestões de estrutura textual"]. Todas as análises estatísticas, interpretações dos 
+resultados e conclusões são de responsabilidade exclusiva dos autores. O uso de IA foi restrito a 
+[**descreva a limitação**: ex. "apoio na escrita e formatação, não na condução das análises"]. 
+Os autores declaram que revisaram criticamente todo o conteúdo gerado com auxílio de IA.
+:::
+
+---
+
+# Referências {.unnumbered}
+
+::: {#refs}
+:::
+

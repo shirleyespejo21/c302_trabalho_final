@@ -1,53 +1,47 @@
 # =====================================================================
-# PÁGINA ALIMENTOS  —  VERSÃO CONVERTIDA (para comparar)
+# PÁGINA ALIMENTOS —  heatmap, guerras e ranking
 # =====================================================================
-# Este arquivo é o shiny_alimentos.R + graficos_alimentos.R adaptados
-# ao molde do projeto. Para usar: copie TUDO isto para R/20_alimentos.R
-# (substituindo o conteúdo de lá).
+# Convertido de: codigo_principal_alimentos.R + shiny_alimentos.R
+# Molde seguido: R/20_alimentos.R
 #
-# Também precisa adicionar em R/00_pacotes.R:
-#     library(DT)
-#     library(plotly)
+# Para usar: salve como R/21_alimentos.R
+# Precisa em R/00_pacotes.R:  library(DT)  e  library(plotly)
+#
+# REGRA: tudo termina em _alimentos (objetos, inputs e outputs),
+# para NÃO colidir com o que já existe em R/20_alimentos.R.
+# Este arquivo é autônomo: não depende de nada do 20, só de
+#   food_beverages (R/01_dados.R), cores, tema_mix e pagina() do projeto.
 #
 # O QUE FOI TIRADO do código original:
 #   - library(...)                 -> vão para R/00_pacotes.R
 #   - read_csv() do GitHub         -> food_beverages já vem de R/01_dados.R
+#   - options(DT.options ...)      -> já definido em R/20_alimentos.R (é global)
 #   - dashboardPage / menuItem     -> o menu do projeto já existe (R/03_layout.R)
 #   - box() / valueBox()           -> viraram card() / value_box() (bslib)
-#   - CSS do .small-box            -> não existe mais (era do shinydashboard)
 #   - shinyApp(ui, server)         -> o app.R já faz isso
-#
-# REGRA: tudo termina em _alimentos (objetos, inputs e outputs).
 # =====================================================================
 
 setor_alimentos <- "Alimentos"
-cor_alimentos   <- unname(cores[setor_alimentos])   # verde-sálvia do projeto
+cor_alimentos   <- unname(cores[setor_alimentos])
 
 
 # =====================================================================
-# PARTE 1 — DADOS E GRÁFICOS   (veio de graficos_alimentos.R)
+# PARTE 1 — DADOS E GRÁFICOS   (veio de codigo_principal + server)
 # =====================================================================
-
-# tradução da tabela DT para português  (igual ao original)
-options(DT.options = list(
-  language = list(
-    decimal = ",", thousands = ".",
-    lengthMenu   = "Mostrar _MENU_ registros por página",
-    zeroRecords  = "Nenhum registro encontrado",
-    info         = "Mostrando de _START_ até _END_ de _TOTAL_ registros",
-    infoEmpty    = "Mostrando 0 até 0 de 0 registros",
-    infoFiltered = "(filtrado de _MAX_ registros no total)",
-    search       = "Buscar:",
-    paginate = list(first = "Primeiro", last = "Último",
-                    `next` = "Próximo", previous = "Anterior")
-  )
-))
-
-# (o read_csv do GitHub foi APAGADO: food_beverages já existe)
 
 variaveis_alimentos <- c(
   "Açúcar", "Glicose", "Substituto_café", "Oleo_de_sementes",
   "Etanol_1", "Etanol_2", "Cerveja"
+)
+
+paleta_alimentos <- c(
+  "Açúcar"           = "#1b9e77",
+  "Glicose"          = "#d95f02",
+  "Substituto_café"  = "#7570b3",
+  "Oleo_de_sementes" = "#e7298a",
+  "Etanol_1"         = "#66a61e",
+  "Etanol_2"         = "#e6ab02",
+  "Cerveja"          = "#1f78b4"
 )
 
 # tradução das colunas + conversão: quintal -> toneladas (x / 10)
@@ -59,26 +53,30 @@ comidas_bebidas_alimentos <- food_beverages |>
   ) |>
   mutate(across(c(Glicose, Substituto_café, Oleo_de_sementes), ~ .x / 10))
 
-# formato longo + década
+# formato longo + década + unidade (hL para cerveja/etanol, t para o resto)
 longo_alimentos <- comidas_bebidas_alimentos |>
   pivot_longer(all_of(variaveis_alimentos), names_to = "Variavel", values_to = "Valor") |>
-  mutate(Decada = paste0(floor(Ano / 10) * 10, "s"))
+  mutate(
+    Decada  = paste0(floor(Ano / 10) * 10, "s"),
+    unidade = ifelse(str_detect(str_to_lower(Variavel), "cerveja|etanol"), "hL", "t")
+  )
 
-# estatística descritiva por década e produto
-cols_estat_alimentos <- c("media", "dp", "min", "q1", "mediana", "q3", "max")
+# estatística descritiva por década e produto (com soma, como no original)
+cols_estat_alimentos <- c("soma", "media", "dp", "min", "q1", "mediana", "q3", "max")
 
 descritiva_alimentos <- longo_alimentos |>
   group_by(Decada, Variavel) |>
   summarise(
     n_obs   = sum(!is.na(Valor)),
     n_na    = sum(is.na(Valor)),
+    soma    = sum(Valor, na.rm = TRUE),
     media   = mean(Valor, na.rm = TRUE),
     dp      = sd(Valor, na.rm = TRUE),
-    min     = min(Valor, na.rm = TRUE),
+    min     = suppressWarnings(min(Valor, na.rm = TRUE)),
     q1      = quantile(Valor, 0.25, na.rm = TRUE, names = FALSE),
     mediana = median(Valor, na.rm = TRUE),
     q3      = quantile(Valor, 0.75, na.rm = TRUE, names = FALSE),
-    max     = max(Valor, na.rm = TRUE),
+    max     = suppressWarnings(max(Valor, na.rm = TRUE)),
     .groups = "drop"
   ) |>
   mutate(across(all_of(cols_estat_alimentos),
@@ -94,168 +92,327 @@ fmt_br_alimentos <- function(x) {
          formatC(x, format = "f", digits = 2, big.mark = ".", decimal.mark = ","))
 }
 
+# média ± DP por década (para o gráfico das guerras)
+dados_decada_alimentos <- longo_alimentos |>
+  filter(!is.na(Decada), !is.na(Variavel), !is.na(Valor)) |>
+  summarise(
+    valor_decada = mean(Valor, na.rm = TRUE),
+    dp_decada    = sd(Valor, na.rm = TRUE),
+    n_obs        = n(),
+    .by = c(Decada, Variavel)
+  ) |>
+  mutate(
+    decada_num = as.numeric(sub("s$", "", Decada)),
+    dp_decada  = coalesce(dp_decada, 0),   # década com 1 observação: DP = 0
+    inferior   = valor_decada - dp_decada,
+    superior   = valor_decada + dp_decada
+  ) |>
+  arrange(Variavel, decada_num)
+
+# limites do eixo Y por variável + faixas das guerras
+# (eram reactive() no original, mas não dependem de input: viram objetos)
+limites_y_alimentos <- dados_decada_alimentos |>
+  summarise(ymin = min(valor_decada, na.rm = TRUE),
+            ymax = max(valor_decada, na.rm = TRUE),
+            .by = Variavel) |>
+  mutate(folga = (ymax - ymin) * 0.05,
+         ymin  = ymin - folga,
+         ymax  = ymax + folga) |>
+  select(Variavel, ymin, ymax)
+
+periodos_guerra_alimentos <- tibble(
+  xmin   = c(1910, 1940) - 5,
+  xmax   = c(1910, 1940) + 5,
+  guerra = c("1910s (1914–1918)", "1940s (1939–1945)")
+) |>
+  crossing(limites_y_alimentos)
+
+# totais por produto no período todo (usados nos KPIs)
+totais_alimentos <- longo_alimentos |>
+  filter(!is.na(Valor)) |>
+  group_by(Variavel, unidade) |>
+  summarise(total_periodo = sum(Valor, na.rm = TRUE), .groups = "drop")
+
 
 # ---------------------------------------------------------------------
-# GRÁFICO 1: violino por década   (veio do server: output$grafico_violino)
+# GRÁFICO 1: heatmap década x produto   (veio de output$grafico_heat)
 # ---------------------------------------------------------------------
-grafico_violino_alimentos <- function(variavel, log = FALSE) {
-  d <- longo_alimentos |>
-    filter(Variavel == variavel, !is.na(Decada), !is.na(Valor))
-  
-  if (isTRUE(log)) d <- d |> filter(Valor > 0)
-  
-  d <- d |> group_by(Decada) |> filter(n() >= 3) |> ungroup()
-  
-  validate(need(nrow(d) > 0, "Sem décadas com dados suficientes para esta variável."))
-  
-  resumo <- d |>
+grafico_heat_alimentos <- function() {
+  f <- function(x) ifelse(is.na(x), "NA", fmt_br_alimentos(x))
+
+  d <- descritiva_alimentos |>
+    filter(!is.na(Decada)) |>
+    mutate(
+      Decada   = factor(Decada, levels = decadas_alimentos),
+      Variavel = factor(Variavel, levels = variaveis_alimentos),
+      z        = log1p(media),
+      hover = paste0(
+        "<b>Década:</b> ", Decada, "<br>",
+        "<b>Variável:</b> ", Variavel, "<br>",
+        "<b>N:</b> ", n_obs, " | <b>NAs:</b> ", n_na, "<br>",
+        "<b>Soma:</b> ", f(soma), "<br>",
+        "<b>Média:</b> ", f(media), "<br>",
+        "<b>DP:</b> ", f(dp), "<br>",
+        "<b>Mín:</b> ", f(min), "<br>",
+        "<b>Q1:</b> ", f(q1), "<br>",
+        "<b>Mediana (Q2):</b> ", f(mediana), "<br>",
+        "<b>Q3:</b> ", f(q3), "<br>",
+        "<b>Máx:</b> ", f(max)
+      ),
+      rotulo = ifelse(is.na(media), "", paste0(f(media), "<br>±", f(dp)))
+    )
+
+  z_meio <- mean(range(d$z, na.rm = TRUE))
+  d <- d |> mutate(cor_txt = ifelse(!is.na(z) & z > z_meio, "white", "black"))
+
+  anotacoes <- lapply(seq_len(nrow(d)), function(i) {
+    list(
+      x = as.character(d$Decada[i]),
+      y = as.character(d$Variavel[i]),
+      text = d$rotulo[i],
+      showarrow = FALSE,
+      font = list(size = 10, color = d$cor_txt[i])
+    )
+  })
+
+  plot_ly(
+    data = d, x = ~Decada, y = ~Variavel, z = ~z,
+    type = "heatmap", text = ~hover, hoverinfo = "text",
+    colorscale = list(c(0, "#ffffcc"), c(0.5, "#fd8d3c"), c(1, "#800026")),
+    colorbar = list(title = "log1p(média)")
+  ) |>
+    layout(
+      xaxis = list(title = "Década", categoryorder = "array",
+                   categoryarray = decadas_alimentos),
+      yaxis = list(title = "Variável", autorange = "reversed"),
+      annotations = anotacoes,
+      hoverlabel = list(align = "left")
+    )
+}
+
+
+# ---------------------------------------------------------------------
+# GRÁFICO 2: ranking por década   (veio de output$grafico_ranking_prod)
+# ---------------------------------------------------------------------
+grafico_ranking_alimentos <- function(periodo) {
+  d <- longo_alimentos |> filter(!is.na(Valor), !is.na(Decada))
+
+  if (periodo == "ww1") {
+    d <- d |> filter(!is.na(Ano), Ano >= 1914, Ano <= 1918)
+  } else if (periodo == "ww2") {
+    d <- d |> filter(!is.na(Ano), Ano >= 1939, Ano <= 1945)
+  } else if (periodo == "pos_ww2") {
+    d <- d |> filter(!is.na(Ano), Ano >= 1946)
+  }
+
+  validate(need(nrow(d) > 0, "Sem dados disponíveis para o período selecionado."))
+
+  rk <- d |>
+    group_by(Decada, Variavel, unidade) |>
+    summarise(total_decada = sum(Valor, na.rm = TRUE), .groups = "drop") |>
     group_by(Decada) |>
-    summarise(
-      n_obs = n(), media = mean(Valor), mediana = median(Valor), dp = sd(Valor),
-      q1 = quantile(Valor, 0.25, names = FALSE), q3 = quantile(Valor, 0.75, names = FALSE),
-      min_val = min(Valor), max_val = max(Valor), .groups = "drop"
-    ) |>
-    mutate(texto_hover = paste0(
-      "<b>Década:</b> ", Decada, "<br>",
-      "<b>N:</b> ", n_obs, "<br>",
-      "<b>Média:</b> ", fmt_br_alimentos(media), "<br>",
-      "<b>Mediana (Q2):</b> ", fmt_br_alimentos(mediana), "<br>",
-      "<b>DP:</b> ", fmt_br_alimentos(dp), "<br>",
-      "<b>Q1 – Q3:</b> ", fmt_br_alimentos(q1), " – ", fmt_br_alimentos(q3), "<br>",
-      "<b>Mín – Máx:</b> ", fmt_br_alimentos(min_val), " – ", fmt_br_alimentos(max_val)
-    ))
-  
-  niveis <- intersect(decadas_alimentos, unique(d$Decada))
-  d      <- d |> left_join(resumo |> select(Decada, texto_hover), by = "Decada") |>
-    mutate(Decada = factor(Decada, levels = niveis))
-  resumo <- resumo |> mutate(Decada = factor(Decada, levels = niveis))
-  
-  p <- ggplot(d, aes(x = Decada, y = Valor, fill = Decada)) +
-    geom_violin(aes(text = texto_hover), scale = "width", alpha = 0.65, colour = "grey30") +
-    geom_boxplot(width = 0.12, fill = "white", outlier.size = 0.8, show.legend = FALSE) +
-    geom_point(data = resumo, aes(x = Decada, y = mediana, text = texto_hover),
-               inherit.aes = FALSE, shape = 23, size = 2.2, fill = "#111111", colour = "white") +
-    scale_fill_viridis_d(option = "D", guide = "none") +
-    labs(title = paste("Distribuição de", variavel, "por Década"), x = NULL, y = variavel) +
-    tema_mix
-  
-  rotulo <- scales::label_number(big.mark = ".", decimal.mark = ",")
-  p <- if (isTRUE(log)) p + scale_y_log10(labels = rotulo) else p + scale_y_continuous(labels = rotulo)
-  
+    mutate(posicao = rank(desc(total_decada), ties.method = "min")) |>
+    ungroup()
+
+  niveis_decada <- intersect(decadas_alimentos, unique(rk$Decada))
+  n_prod <- length(variaveis_alimentos)
+
+  rk <- rk |>
+    mutate(
+      Decada   = factor(Decada, levels = niveis_decada),
+      Variavel = factor(Variavel, levels = variaveis_alimentos),
+      texto_hover = paste0(
+        "<b>", Variavel, "</b> (", Decada, ")<br>",
+        "<b>Posição:</b> #", posicao, "<br>",
+        "<b>Total na década:</b> ", fmt_br_alimentos(total_decada), " ", unidade
+      )
+    )
+
+  p <- ggplot(rk, aes(x = Decada, y = posicao, color = Variavel, group = Variavel)) +
+    geom_line(linewidth = 1.1, alpha = 0.9) +
+    geom_point(aes(text = texto_hover), size = 3.2, alpha = 0.95) +
+    scale_y_reverse(breaks = seq_len(n_prod), labels = paste0("#", seq_len(n_prod))) +
+    scale_color_manual(values = paleta_alimentos, name = "Produto", drop = FALSE) +
+    labs(x = "Década", y = "Posição no ranking") +
+    tema_mix +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "right")
+
   ggplotly(p, tooltip = "text") |> layout(hoverlabel = list(align = "left"))
 }
 
 
 # ---------------------------------------------------------------------
-# GRÁFICO 2: série anual + LOESS   (veio do server: output$grafico_serie_loess)
+# GRÁFICO 3: média ± DP por década, com guerras   (output$grafico_mm_guerras)
 # ---------------------------------------------------------------------
-grafico_serie_alimentos <- function(variavel, janela) {
-  ano_ini <- janela[1]
-  ano_fim <- janela[2]
-  
-  d <- longo_alimentos |>
-    filter(Variavel == variavel, !is.na(Ano), !is.na(Valor),
-           Ano >= (ano_ini - 10), Ano <= ano_fim) |>
-    mutate(texto_ponto = paste0("<b>Ano:</b> ", Ano, "<br>",
-                                "<b>", variavel, ":</b> ", fmt_br_alimentos(Valor))) |>
-    arrange(Ano)
-  
-  validate(need(nrow(d) > 0, "Sem observações válidas no período selecionado."))
-  
-  rotulo <- scales::label_number(big.mark = ".", decimal.mark = ",")
-  
-  p <- ggplot(d, aes(x = Ano, y = Valor)) +
-    geom_segment(aes(xend = Ano, yend = 0, color = Valor, text = texto_ponto), linewidth = 0.8) +
-    geom_smooth(method = "loess", se = FALSE, color = "#0F3A40", linewidth = 1) +
-    coord_cartesian(xlim = c(ano_ini, ano_fim)) +
-    scale_color_gradient(low = "#CE2B37", high = cor_alimentos, labels = rotulo) +
-    labs(title = paste("Série Anual e Tendência LOESS:", variavel),
-         x = "Ano", y = variavel, color = variavel) +
-    tema_mix
-  
+grafico_guerras_alimentos <- function() {
+  eixo_x <- sort(unique(dados_decada_alimentos$decada_num))
+
+  dd <- dados_decada_alimentos |>
+    mutate(
+      Variavel = factor(Variavel, levels = variaveis_alimentos),
+      texto_hover = paste0(
+        "<b>Década:</b> ", Decada, "<br>",
+        "<b>Média:</b> ", fmt_br_alimentos(valor_decada), "<br>",
+        "<b>DP:</b> ", fmt_br_alimentos(dp_decada), "<br>",
+        "<b>Média ± DP:</b> ", fmt_br_alimentos(inferior), " – ",
+        fmt_br_alimentos(superior), "<br>",
+        "<b>N:</b> ", n_obs
+      )
+    )
+
+  p <- ggplot() +
+    geom_rect(
+      data = periodos_guerra_alimentos,
+      aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = guerra),
+      alpha = 0.35, inherit.aes = FALSE
+    ) +
+    geom_errorbar(
+      data = dd,
+      aes(x = decada_num, ymin = inferior, ymax = superior, color = Variavel),
+      width = 2, linewidth = 0.6, alpha = 0.85
+    ) +
+    geom_line(
+      data = dd,
+      aes(x = decada_num, y = valor_decada, color = Variavel, group = Variavel),
+      linewidth = 1.0, alpha = 0.95
+    ) +
+    geom_point(
+      data = dd,
+      aes(x = decada_num, y = valor_decada, color = Variavel, text = texto_hover),
+      size = 2.2, alpha = 0.95
+    ) +
+    facet_wrap(~ Variavel, scales = "free_y", ncol = 2) +
+    scale_color_manual(values = paleta_alimentos, guide = "none", drop = FALSE) +
+    scale_fill_manual(
+      values = c("1910s (1914–1918)" = "#f39c12", "1940s (1939–1945)" = "#e74c3c"),
+      name = "Período destacado"
+    ) +
+    scale_x_continuous(breaks = eixo_x, labels = paste0(eixo_x, "s")) +
+    scale_y_continuous(labels = scales::label_number(big.mark = ".", decimal.mark = ",")) +
+    labs(x = "Década", y = "Média na década") +
+    tema_mix +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "bottom")
+
   ggplotly(p, tooltip = "text") |> layout(hoverlabel = list(align = "left"))
 }
 
 
 # =====================================================================
-# PARTE 2 — TELA (UI)   (veio do  ui <- dashboardPage(...)  )
-#   tabItem  -> nav_panel      box -> card      valueBox -> value_box
-#   sidebarLayout -> layout_sidebar
+# PARTE 2 — TELA (UI)
+#   tabItem -> nav_panel     box -> card     valueBox -> value_box
 # =====================================================================
 ui_alimentos <- function() {
-  pagina("alimentos", "Alimentos", "Produção italiana de alimentos e bebidas",
-         
-         # cor do cabeçalho das tabelas (era o CSS do original, com os IDs novos)
-         tags$style(HTML(paste0(
-           "#tabela_brutos_alimentos thead th, #tabela_descritiva_alimentos thead th {",
-           " background-color: ", cor_alimentos, " !important; color: #fff !important; }"
-         ))),
-         
-         navset_card_tab(
-           
-           # ------------ ABA 1 (era aba1_visao_geral) ------------
-           nav_panel("Visão Geral e Décadas",
-                     
-                     layout_columns(
-                       value_box("Linhas",    textOutput("kpi_linhas_alimentos"),    showcase = icon("table")),
-                       value_box("Período",   textOutput("kpi_periodo_alimentos"),   showcase = icon("calendar")),
-                       value_box("Variáveis", textOutput("kpi_variaveis_alimentos"), showcase = icon("list"))
-                     ),
-                     
-                     layout_columns(
-                       card(card_header("Base traduzida e convertida"),
-                            downloadButton("baixar_base_alimentos", "Baixar base (.csv)"),
-                            DTOutput("tabela_brutos_alimentos")),
-                       card(card_header("Estatística descritiva por década e produto"),
-                            downloadButton("baixar_descritiva_alimentos", "Baixar estatística (.csv)"),
-                            DTOutput("tabela_descritiva_alimentos"))
-                     ),
-                     
-                     card(card_header("Distribuição Histórica por Década"),
-                          layout_sidebar(
-                            sidebar = sidebar(
-                              selectInput("variavel_alimentos", "Selecione o Produto:",
-                                          choices = variaveis_alimentos, selected = "Cerveja"),
-                              checkboxInput("log_alimentos", "Usar escala logarítmica no eixo Y", FALSE),
-                              helpText("Décadas com menos de 3 observações não são exibidas.")
-                            ),
-                            plotlyOutput("violino_alimentos", height = "480px")
-                          ))
-           ),
-           
-           # ------------ ABA 2 (era aba2_his_war_beer) ------------
-           nav_panel("História, Guerras e Cerveja",
-                     card(card_header("Série Anual com Tendência LOESS"),
-                          layout_sidebar(
-                            sidebar = sidebar(
-                              selectInput("variavel_serie_alimentos", "Selecione o Produto:",
-                                          choices = variaveis_alimentos, selected = "Cerveja"),
-                              sliderInput("janela_alimentos", "Janela de anos:",
-                                          min = anos_min_alimentos, max = anos_max_alimentos,
-                                          value = c(max(anos_min_alimentos, anos_max_alimentos - 25),
-                                                    anos_max_alimentos),
-                                          sep = "", step = 1)
-                            ),
-                            plotlyOutput("serie_alimentos", height = "480px")
-                          ))
-           )
-         )
+  pagina("alimentos", "Alimentos", "Visão geral, guerras e ranking da produção italiana",
+
+    # cor do cabeçalho das tabelas
+    tags$style(HTML(paste0(
+      "#tabela_brutos_alimentos thead th, #tabela_descritiva_alimentos thead th {",
+      " background-color: ", cor_alimentos, " !important; color: #fff !important; }"
+    ))),
+
+    navset_card_tab(
+
+      # ------------ ABA 1 (era aba1_visao_geral) ------------
+      nav_panel("Visão Geral e KPIs",
+
+        layout_columns(
+          col_widths = c(3, 3, 3, 3),
+          value_box("Período",
+                    textOutput("kpi_periodo_alimentos"),
+                    textOutput("kpi_periodo_sub_alimentos"),
+                    showcase = icon("calendar")),
+          value_box("Toneladas totais",
+                    textOutput("kpi_ton_alimentos"),
+                    textOutput("kpi_ton_sub_alimentos"),
+                    showcase = icon("weight-hanging")),
+          value_box("Volume total",
+                    textOutput("kpi_hl_alimentos"),
+                    textOutput("kpi_hl_sub_alimentos"),
+                    showcase = icon("bottle-droplet")),
+          value_box("Maior produção total",
+                    textOutput("kpi_maior_alimentos"),
+                    textOutput("kpi_maior_sub_alimentos"),
+                    showcase = icon("arrow-trend-up"))
+        ),
+
+        card(card_header("Comparativo entre produtos: como cada produto evoluiu de década em década?"),
+             plotlyOutput("heat_alimentos", height = "520px"),
+             helpText("Cor = log1p da média. Em cada célula: média e desvio padrão (±).",
+                      "Passe o mouse para ver N, NAs, soma, média, DP, mín, Q1, mediana, Q3 e máx.",
+                      "Células em branco = década sem dados para a variável.")),
+
+        card(card_header("Base traduzida e convertida (toneladas e hectolitros)"),
+             downloadButton("baixar_base_alimentos", "Baixar base (.csv)"),
+             DTOutput("tabela_brutos_alimentos"))
+      ),
+
+      # ------------ ABA 2 (era aba2_his_war_beer) ------------
+      nav_panel("História, Guerras e Ranking",
+
+        card(card_header("Série por década: o que mais oscilou nas guerras? (1914–1918 e 1939–1945)"),
+             plotlyOutput("guerras_alimentos", height = "900px")),
+
+        card(card_header("Ranking por década: qual produto liderou cada década?"),
+          layout_sidebar(
+            sidebar = sidebar(
+              selectInput("periodo_ranking_alimentos", "Selecione o período:",
+                          choices = c("Período todo"          = "todo",
+                                      "1ª Guerra (1914–1918)" = "ww1",
+                                      "2ª Guerra (1939–1945)" = "ww2",
+                                      "Pós-2ª Guerra (1946+)" = "pos_ww2"),
+                          selected = "todo")
+            ),
+            plotlyOutput("ranking_alimentos", height = "460px")
+          )),
+
+        card(card_header("Estatística descritiva por década e produto"),
+             downloadButton("baixar_descritiva_alimentos", "Baixar estatística (.csv)"),
+             DTOutput("tabela_descritiva_alimentos"))
+      )
+    )
   )
 }
 
 
 # =====================================================================
-# PARTE 3 — SERVER   (veio do  server <- function(input, output) {...} )
+# PARTE 3 — SERVER
 # =====================================================================
 server_alimentos <- function(input, output, session) {
-  
-  # KPIs (eram valueBox; agora só o texto, o value_box está na UI)
-  output$kpi_linhas_alimentos    <- renderText(format(nrow(food_beverages), big.mark = "."))
-  output$kpi_periodo_alimentos   <- renderText(paste0(anos_min_alimentos, "–", anos_max_alimentos,
-                                                      " (", length(decadas_alimentos), " décadas)"))
-  output$kpi_variaveis_alimentos <- renderText(length(variaveis_alimentos))
-  
-  # tabela 1: base traduzida (NA aparece como "NA")
+
+  # ---------------- KPIs ----------------
+  df_ton <- totais_alimentos |> filter(unidade == "t")  |> arrange(desc(total_periodo))
+  df_hl  <- totais_alimentos |> filter(unidade == "hL") |> arrange(desc(total_periodo))
+  df_top <- totais_alimentos |> arrange(desc(total_periodo))
+
+  output$kpi_periodo_alimentos     <- renderText(paste0(anos_min_alimentos, "-", anos_max_alimentos))
+  output$kpi_periodo_sub_alimentos <- renderText(paste0("Faixa de anos (", length(decadas_alimentos), " décadas)"))
+
+  output$kpi_ton_alimentos <- renderText(
+    if (nrow(df_ton) == 0) "0,00 t" else paste0(fmt_br_alimentos(sum(df_ton$total_periodo)), " t")
+  )
+  output$kpi_ton_sub_alimentos <- renderText(
+    if (nrow(df_ton) == 0) "Sem produtos em t" else paste0("Líder: ", df_ton$Variavel[1])
+  )
+
+  output$kpi_hl_alimentos <- renderText(
+    if (nrow(df_hl) == 0) "0,00 hL" else paste0(fmt_br_alimentos(sum(df_hl$total_periodo)), " hL")
+  )
+  output$kpi_hl_sub_alimentos <- renderText(
+    if (nrow(df_hl) == 0) "Sem produtos em hL" else paste0("Líder: ", df_hl$Variavel[1])
+  )
+
+  output$kpi_maior_alimentos <- renderText({
+    req(nrow(df_top) > 0)
+    as.character(df_top$Variavel[1])
+  })
+  output$kpi_maior_sub_alimentos <- renderText({
+    req(nrow(df_top) > 0)
+    paste0(fmt_br_alimentos(df_top$total_periodo[1]), " ", df_top$unidade[1])
+  })
+
+  # ---------------- tabelas ----------------
   output$tabela_brutos_alimentos <- renderDT({
     js_na <- JS(
       "function(data, type, row, meta) {",
@@ -270,8 +427,7 @@ server_alimentos <- function(input, output, session) {
               options = list(pageLength = 10, scrollX = TRUE,
                              columnDefs = list(list(targets = alvo, render = js_na))))
   })
-  
-  # tabela 2: estatística descritiva (2 casas, padrão BR)
+
   output$tabela_descritiva_alimentos <- renderDT({
     js_2dec <- JS(
       "function(data, type, row, meta) {",
@@ -286,13 +442,13 @@ server_alimentos <- function(input, output, session) {
     )
     alvo <- which(names(descritiva_alimentos) %in% cols_estat_alimentos) - 1
     datatable(descritiva_alimentos, rownames = FALSE,
-              colnames = c("Década", "Variável", "N", "NAs", "Média", "DP",
+              colnames = c("Década", "Variável", "N", "NAs", "Soma", "Média", "DP",
                            "Mín", "Q1", "Mediana", "Q3", "Máx"),
               options = list(pageLength = 10, scrollX = TRUE,
                              columnDefs = list(list(targets = alvo, render = js_2dec))))
   })
-  
-  # downloads
+
+  # ---------------- downloads ----------------
   output$baixar_base_alimentos <- downloadHandler(
     filename = function() paste0("comidas_bebidas_", Sys.Date(), ".csv"),
     content  = function(file) readr::write_csv(comidas_bebidas_alimentos, file)
@@ -301,12 +457,12 @@ server_alimentos <- function(input, output, session) {
     filename = function() paste0("estatistica_descritiva_", Sys.Date(), ".csv"),
     content  = function(file) readr::write_csv(descritiva_alimentos, file)
   )
-  
-  # gráficos (1 linha cada — as funções estão na PARTE 1)
-  output$violino_alimentos <- renderPlotly(
-    grafico_violino_alimentos(input$variavel_alimentos, input$log_alimentos)
-  )
-  output$serie_alimentos <- renderPlotly(
-    grafico_serie_alimentos(input$variavel_serie_alimentos, input$janela_alimentos)
+
+  # ---------------- gráficos (1 linha cada) ----------------
+  output$heat_alimentos    <- renderPlotly(grafico_heat_alimentos())
+  output$guerras_alimentos <- renderPlotly(grafico_guerras_alimentos())
+  output$ranking_alimentos <- renderPlotly(
+    grafico_ranking_alimentos(input$periodo_ranking_alimentos)
   )
 }
+
